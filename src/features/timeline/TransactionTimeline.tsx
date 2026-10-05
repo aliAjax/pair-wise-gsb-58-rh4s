@@ -9,8 +9,8 @@ import {
 import { CircleDollarSign, FileClock, Link2, UserCheck } from "lucide-react";
 import type {
   Alert,
+  CaseGraphEdge,
   Evidence,
-  InvestigationEdge,
 } from "../../models/types";
 
 interface TimelineEvent {
@@ -24,7 +24,7 @@ interface TimelineEvent {
 
 interface TransactionTimelineProps {
   alerts: Alert[];
-  edges: InvestigationEdge[];
+  edges: CaseGraphEdge[];
   evidence: Evidence[];
   focusedId?: string;
   onFocus: (event?: TimelineEvent) => void;
@@ -50,7 +50,7 @@ export function TransactionTimeline({
       id: item.id,
       at: item.occurredAt,
       title: item.label,
-      detail: item.explanation,
+      detail: `${item.explanation} · 共享关系 V${item.relationVersion}${item.verified ? " · 已核验" : ""}`,
       source: "transaction" as const,
       resourceId: item.id,
     })),

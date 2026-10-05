@@ -21,18 +21,20 @@ import ReactFlow, {
   type NodeProps,
 } from "reactflow";
 import type {
-  InvestigationEdge,
-  InvestigationNode,
+  CaseGraphEdge,
+  CaseGraphNode,
   NodeKind,
 } from "../../models/types";
-import { RiskBadge } from "../../components/Badges";
+import { RiskBadge, VerificationBadge } from "../../components/Badges";
 
 interface GraphNodeData {
   label: string;
   kind: NodeKind;
-  riskLevel: InvestigationNode["data"]["riskLevel"];
+  riskLevel: CaseGraphNode["data"]["riskLevel"];
   note: string;
-  evidenceStrength: InvestigationNode["data"]["evidenceStrength"];
+  evidenceStrength: CaseGraphNode["data"]["evidenceStrength"];
+  entityVersion: number;
+  verified: boolean;
 }
 
 const nodeMeta: Record<
@@ -74,6 +76,10 @@ function InvestigationNodeCard({
       </Group>
       <Group gap={6} mt="xs">
         <RiskBadge value={data.riskLevel} />
+        <Badge variant="light" color="gray">
+          V{data.entityVersion}
+        </Badge>
+        <VerificationBadge verified={data.verified} />
       </Group>
       <Handle type="source" position={Position.Bottom} />
     </Paper>
@@ -83,8 +89,8 @@ function InvestigationNodeCard({
 const nodeTypes = { investigation: InvestigationNodeCard };
 
 interface InvestigationGraphProps {
-  nodes: InvestigationNode[];
-  edges: InvestigationEdge[];
+  nodes: CaseGraphNode[];
+  edges: CaseGraphEdge[];
   selectedNodeId?: string;
   focusedTimelineId?: string;
   onSelectNode: (nodeId?: string) => void;
@@ -115,6 +121,8 @@ export function InvestigationGraph({
           riskLevel: item.data.riskLevel,
           note: item.data.note,
           evidenceStrength: item.data.evidenceStrength,
+          entityVersion: item.entityVersion,
+          verified: item.verified,
         },
       })),
     [nodes, selectedNodeId],

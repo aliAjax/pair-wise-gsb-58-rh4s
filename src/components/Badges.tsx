@@ -102,6 +102,18 @@ export function ConclusionStatusBadge({
   );
 }
 
+export function VerificationBadge({ verified }: { verified: boolean }) {
+  return verified ? (
+    <Badge color="teal" variant="light">
+      已核验
+    </Badge>
+  ) : (
+    <Badge color="gray" variant="light">
+      未核验
+    </Badge>
+  );
+}
+
 export const riskOrder = (risk: RiskLevel): number => riskMap[risk].order;
 export const riskLabel = (risk: RiskLevel): string => riskMap[risk].label;
 export const caseStatusLabel = (status: CaseStatus): string =>

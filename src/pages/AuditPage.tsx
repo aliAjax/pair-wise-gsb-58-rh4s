@@ -1,4 +1,5 @@
 import {
+  Badge,
   Button,
   Group,
   Paper,
@@ -13,7 +14,13 @@ import {
 import { notifications } from "@mantine/notifications";
 import { Download, RotateCcw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useGetAuditLogsQuery, useGetCasesQuery, useResetMockDataMutation } from "../services/api";
+import { RiskBadge, VerificationBadge } from "../components/Badges";
+import {
+  useGetAuditLogsQuery,
+  useGetCasesQuery,
+  useGetSharedEntitiesQuery,
+  useResetMockDataMutation,
+} from "../services/api";
 
 const download = (
   filename: string,
@@ -35,10 +42,22 @@ const escapeCsv = (value: string): string =>
 export function AuditPage() {
   const { data: logs = [] } = useGetAuditLogsQuery();
   const { data: cases = [] } = useGetCasesQuery();
+  const { data: entityOverview } = useGetSharedEntitiesQuery();
   const [resetMockData, { isLoading: isResetting }] =
     useResetMockDataMutation();
   const [keyword, setKeyword] = useState("");
   const [caseId, setCaseId] = useState("all");
+
+  const entities = entityOverview?.entities ?? [];
+
+  const entityKindLabel = (kind: string) =>
+    kind === "device"
+      ? "设备"
+      : kind === "ip"
+        ? "IP"
+        : kind === "account"
+          ? "账户"
+          : "商户";
 
   const filteredLogs = useMemo(() => {
     const normalized = keyword.trim().toLowerCase();
@@ -117,10 +136,69 @@ export function AuditPage() {
           >
             导出 CSV
           </Button>
+          <Button
+            variant="light"
+            color="grape"
+            leftSection={<Download size={16} />}
+            onClick={() =>
+              download(
+                "shared-entities.json",
+                JSON.stringify(entities, null, 2),
+                "application/json;charset=utf-8",
+              )
+            }
+          >
+            导出实体 JSON
+          </Button>
+          <Button
+            variant="light"
+            color="grape"
+            leftSection={<Download size={16} />}
+            onClick={() =>
+              download(
+                "shared-entities.csv",
+                [
+                  [
+                    "实体ID",
+                    "类型",
+                    "归并键",
+                    "名称",
+                    "风险",
+                    "证据强度",
+                    "版本",
+                    "核验状态",
+                    "核验人",
+                    "最近更新",
+                    "更新人",
+                    "关联时间",
+                  ],
+                  ...entities.map((item) => [
+                    item.id,
+                    entityKindLabel(item.kind),
+                    item.canonicalKey,
+                    item.label,
+                    item.riskLevel,
+                    item.evidenceStrength,
+                    `V${item.version}`,
+                    item.verifiedVersion === item.version ? "已核验" : "未核验",
+                    item.verifiedBy ?? "",
+                    item.updatedAt,
+                    item.updatedBy,
+                    item.occurredAt,
+                  ]),
+                ]
+                  .map((row) => row.map(escapeCsv).join(","))
+                  .join("\n"),
+                "text/csv;charset=utf-8",
+              )
+            }
+          >
+            导出实体 CSV
+          </Button>
         </Group>
       </Group>
 
-      <SimpleGrid cols={{ base: 1, sm: 3 }}>
+      <SimpleGrid cols={{ base: 1, sm: 4 }}>
         <Paper withBorder p="md">
           <Text size="sm" c="dimmed">
             审计事件
@@ -135,6 +213,14 @@ export function AuditPage() {
           </Text>
           <Title order={3} mt={5}>
             {new Set(logs.map((item) => item.caseId).filter(Boolean)).size}
+          </Title>
+        </Paper>
+        <Paper withBorder p="md">
+          <Text size="sm" c="dimmed">
+            共享实体
+          </Text>
+          <Title order={3} mt={5}>
+            {entities.length}
           </Title>
         </Paper>
         <Paper withBorder p="md">
@@ -206,6 +292,76 @@ export function AuditPage() {
                   </Table.Td>
                   <Table.Td maw={520}>
                     <Text size="sm">{item.detail}</Text>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
+      </Paper>
+
+      <Paper withBorder>
+        <Group justify="space-between" p="md">
+          <div>
+            <Text fw={600}>共享实体版本台账</Text>
+            <Text size="sm" c="dimmed">
+              与案件页、时间轴、导出使用同一份实体记录与版本号。
+            </Text>
+          </div>
+          <Badge variant="light" color="gray">
+            {entities.length} 个实体
+          </Badge>
+        </Group>
+        <Table.ScrollContainer minWidth={960}>
+          <Table highlightOnHover verticalSpacing="sm">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>实体</Table.Th>
+                <Table.Th>类型</Table.Th>
+                <Table.Th>归并键</Table.Th>
+                <Table.Th>风险</Table.Th>
+                <Table.Th>版本</Table.Th>
+                <Table.Th>核验</Table.Th>
+                <Table.Th>最近更新</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {entities.map((item) => (
+                <Table.Tr key={item.id}>
+                  <Table.Td>
+                    <Text size="sm" fw={600}>
+                      {item.label}
+                    </Text>
+                    <Text size="xs" c="dimmed" ff="monospace">
+                      {item.id}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>{entityKindLabel(item.kind)}</Table.Td>
+                  <Table.Td>
+                    <Text size="xs" ff="monospace">
+                      {item.canonicalKey}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <RiskBadge value={item.riskLevel} />
+                  </Table.Td>
+                  <Table.Td>
+                    <Badge variant="light" color="gray">
+                      V{item.version}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    <VerificationBadge
+                      verified={item.verifiedVersion === item.version}
+                    />
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="xs">
+                      {item.updatedBy} ·{" "}
+                      {new Date(item.updatedAt).toLocaleString("zh-CN", {
+                        hour12: false,
+                      })}
+                    </Text>
                   </Table.Td>
                 </Table.Tr>
               ))}

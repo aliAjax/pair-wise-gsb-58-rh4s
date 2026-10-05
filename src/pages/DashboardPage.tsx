@@ -9,15 +9,19 @@ import {
   Stack,
   Table,
   Text,
+  TextInput,
   Title,
 } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import {
   ArrowRight,
   CircleAlert,
   Files,
+  GitMerge,
   ShieldAlert,
   WalletCards,
 } from "lucide-react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CaseStatusBadge,
@@ -25,7 +29,12 @@ import {
   riskLabel,
   riskOrder,
 } from "../components/Badges";
-import { useGetCasesQuery, useGetDashboardQuery } from "../services/api";
+import {
+  useGetCasesQuery,
+  useGetDashboardQuery,
+  useGetSharedEntitiesQuery,
+  useResolvePendingEntityMutation,
+} from "../services/api";
 
 const currency = new Intl.NumberFormat("zh-CN", {
   style: "currency",
@@ -37,6 +46,48 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const { data, isLoading } = useGetDashboardQuery();
   const { data: cases = [] } = useGetCasesQuery();
+  const { data: entityOverview } = useGetSharedEntitiesQuery();
+  const [resolvePending, { isLoading: isResolving }] =
+    useResolvePendingEntityMutation();
+  const [identifiers, setIdentifiers] = useState<Record<string, string>>({});
+
+  const handleResolve = async (pendingId: string, mode: "merge" | "dismiss") => {
+    try {
+      if (mode === "merge") {
+        const identifier = (identifiers[pendingId] ?? "").trim();
+        if (!identifier) {
+          notifications.show({
+            color: "red",
+            title: "缺少标识",
+            message: "请输入确认后的设备号或 IP 再归并。",
+          });
+          return;
+        }
+        await resolvePending({ pendingId, mode: "merge", identifier }).unwrap();
+        notifications.show({
+          color: "teal",
+          title: "已归并",
+          message: "待核记录已并入共享实体，相关案件图谱同步可见。",
+        });
+      } else {
+        await resolvePending({ pendingId, mode: "dismiss" }).unwrap();
+        notifications.show({
+          color: "gray",
+          title: "已排除",
+          message: "该待核记录已标记为无法归并。",
+        });
+      }
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        title: "处理失败",
+        message:
+          typeof error === "object" && error && "error" in error
+            ? String(error.error)
+            : "操作失败，请重试。",
+      });
+    }
+  };
 
   if (isLoading || !data) {
     return <Text>正在加载调查概览...</Text>;
@@ -237,6 +288,135 @@ export function DashboardPage() {
           </Paper>
         </Grid.Col>
       </Grid>
+
+      {entityOverview ? (
+        <Paper withBorder>
+          <Group justify="space-between" p="md">
+            <div>
+              <Title order={4}>共享实体记录</Title>
+              <Text size="sm" c="dimmed">
+                设备、IP、账户、商户全库唯一一份，所有案件引用同一版本。
+                {entityOverview.migration
+                  ? ` 旧数据迁移于 ${new Date(entityOverview.migration.ranAt).toLocaleString("zh-CN", { hour12: false })}：归并重复节点 ${entityOverview.migration.duplicateNodeCount} 个，待核 ${entityOverview.migration.pendingCount} 条。`
+                  : ""}
+              </Text>
+            </div>
+            <Group gap="xs">
+              <Badge variant="light" color="gray">
+                实体 {entityOverview.entities.length} 个
+              </Badge>
+              <Badge variant="light" color="teal">
+                已核验{" "}
+                {
+                  entityOverview.entities.filter(
+                    (item) => item.verifiedVersion === item.version,
+                  ).length
+                }{" "}
+                个
+              </Badge>
+              <Badge
+                variant="light"
+                color={entityOverview.pending.length > 0 ? "orange" : "gray"}
+              >
+                待核 {entityOverview.pending.length} 条
+              </Badge>
+            </Group>
+          </Group>
+          {entityOverview.pending.length > 0 ? (
+            <Table.ScrollContainer minWidth={860}>
+              <Table verticalSpacing="sm">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>待核节点</Table.Th>
+                    <Table.Th>类型</Table.Th>
+                    <Table.Th>涉及案件</Table.Th>
+                    <Table.Th>无法确认原因</Table.Th>
+                    <Table.Th>确认标识</Table.Th>
+                    <Table.Th />
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {entityOverview.pending.map((item) => (
+                    <Table.Tr key={item.id}>
+                      <Table.Td>
+                        <Text size="sm" fw={600}>
+                          {item.label}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          来源节点 {item.sourceNodeIds.join("、") || "新登记"}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        {item.kind === "device"
+                          ? "设备"
+                          : item.kind === "ip"
+                            ? "IP"
+                            : item.kind === "account"
+                              ? "账户"
+                              : "商户"}
+                      </Table.Td>
+                      <Table.Td ff="monospace">
+                        <Text size="xs">{item.caseIds.join("、")}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" c="dimmed">
+                          {item.reason}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td w={220}>
+                        <TextInput
+                          size="xs"
+                          placeholder={
+                            item.kind === "device"
+                              ? "确认设备号，如 DV-A91F"
+                              : item.kind === "ip"
+                                ? "确认 IP，如 117.136.40.17"
+                                : "确认归并名称"
+                          }
+                          value={identifiers[item.id] ?? ""}
+                          onChange={(event) =>
+                            setIdentifiers((current) => ({
+                              ...current,
+                              [item.id]: event.currentTarget.value,
+                            }))
+                          }
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap="xs" wrap="nowrap">
+                          <Button
+                            size="compact-xs"
+                            variant="light"
+                            color="teal"
+                            loading={isResolving}
+                            leftSection={<GitMerge size={13} />}
+                            onClick={() => handleResolve(item.id, "merge")}
+                          >
+                            归并
+                          </Button>
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            color="gray"
+                            loading={isResolving}
+                            onClick={() => handleResolve(item.id, "dismiss")}
+                          >
+                            排除
+                          </Button>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          ) : (
+            <Text size="sm" c="dimmed" p="md" pt={0}>
+              没有待核的重复节点。
+            </Text>
+          )}
+        </Paper>
+      ) : null}
     </Stack>
   );
 }

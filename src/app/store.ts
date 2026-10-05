@@ -14,5 +14,14 @@ export const store = configureStore({
 
 setupListeners(store.dispatch);
 
+// 其他窗口写入主库后，本窗口缓存立即失效，保证两边看到同一实体版本
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event?.key === "bank-fraud-investigation-db") {
+      store.dispatch(bankApi.util.resetApiState());
+    }
+  });
+}
+
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;

@@ -274,6 +274,62 @@ export const seedNodes: InvestigationNode[] = [
       occurredAt: "2026-09-25T14:10:00+08:00",
     },
   },
+  {
+    id: "N-4108-015",
+    caseId: "CASE-2026-015",
+    position: { x: 480, y: 60 },
+    data: {
+      label: "6222 **** 4108",
+      kind: "account",
+      riskLevel: "medium",
+      note: "旧案登记的归集账户，风险等级与 017 案不一致。",
+      evidenceStrength: "medium",
+      source: "交易明细 20260925-018",
+      occurredAt: "2026-09-25T14:10:00+08:00",
+    },
+  },
+  {
+    id: "N-DV-A91F-015",
+    caseId: "CASE-2026-015",
+    position: { x: 480, y: 200 },
+    data: {
+      label: "设备 DV-A91F",
+      kind: "device",
+      riskLevel: "medium",
+      note: "旧案登记的共用设备，风险等级未与 017 案同步。",
+      evidenceStrength: "medium",
+      source: "设备指纹日志",
+      occurredAt: "2026-09-25T14:10:00+08:00",
+    },
+  },
+  {
+    id: "N-IP-117-015",
+    caseId: "CASE-2026-015",
+    position: { x: 480, y: 340 },
+    data: {
+      label: "117.136.40.17",
+      kind: "ip",
+      riskLevel: "high",
+      note: "历史案件标记为高风险出口，与 017 案记录不一致。",
+      evidenceStrength: "medium",
+      source: "登录 IP 清单",
+      occurredAt: "2026-09-25T14:10:00+08:00",
+    },
+  },
+  {
+    id: "N-DV-UNKNOWN-015",
+    caseId: "CASE-2026-015",
+    position: { x: 760, y: 200 },
+    data: {
+      label: "未知设备（日志缺失）",
+      kind: "device",
+      riskLevel: "low",
+      note: "设备指纹缺失，无法确认设备号。",
+      evidenceStrength: "weak",
+      source: "风控日志平台",
+      occurredAt: "2026-09-25T14:10:00+08:00",
+    },
+  },
 ];
 
 export const seedEdges: InvestigationEdge[] = [
@@ -328,6 +384,36 @@ export const seedEdges: InvestigationEdge[] = [
     label: "登录 IP",
     occurredAt: "2026-09-28T12:06:00+08:00",
     explanation: "共享 IP 是关联线索，不能单独作为账户控制的结论。",
+  },
+  {
+    id: "E-100",
+    caseId: "CASE-2026-015",
+    source: "N-DV-A91F-015",
+    target: "N-4108-015",
+    kind: "shared_device",
+    label: "常用设备",
+    occurredAt: "2026-09-25T14:10:00+08:00",
+    explanation: "与 017 案重复登记的关系，迁移后应合并为同一条共享关系。",
+  },
+  {
+    id: "E-101",
+    caseId: "CASE-2026-015",
+    source: "N-IP-117-015",
+    target: "N-3386",
+    kind: "shared_ip",
+    label: "登录 IP",
+    occurredAt: "2026-09-25T14:10:00+08:00",
+    explanation: "IP 归属与 017 案记录不一致，迁移时需归并。",
+  },
+  {
+    id: "E-102",
+    caseId: "CASE-2026-015",
+    source: "N-DV-UNKNOWN-015",
+    target: "N-3386",
+    kind: "shared_device",
+    label: "疑似共用",
+    occurredAt: "2026-09-25T14:10:00+08:00",
+    explanation: "设备号缺失，无法确认，迁移时随节点一并列入待核。",
   },
 ];
 
@@ -398,6 +484,7 @@ export const seedConclusions: ConclusionVersion[] = [
     createdBy: "林澜",
     createdAt: "2026-09-29T08:20:00+08:00",
     reviewer: "赵平",
+    entityVersions: {},
   },
   {
     id: "CV-016-001",
@@ -410,6 +497,7 @@ export const seedConclusions: ConclusionVersion[] = [
     createdBy: "周明",
     createdAt: "2026-09-29T07:55:00+08:00",
     reviewer: "赵平",
+    entityVersions: {},
   },
   {
     id: "CV-015-001",
@@ -423,6 +511,7 @@ export const seedConclusions: ConclusionVersion[] = [
     createdAt: "2026-09-28T19:20:00+08:00",
     reviewer: "赵平",
     reviewerNote: "补充商户合同与付款用途后再提交，不得以关联代替结论。",
+    entityVersions: {},
   },
 ];
 
