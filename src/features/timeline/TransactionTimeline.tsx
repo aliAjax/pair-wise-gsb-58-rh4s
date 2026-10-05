@@ -11,6 +11,8 @@ import type {
   Alert,
   Evidence,
   InvestigationEdge,
+  InvestigationNode,
+  SharedEntity,
 } from "../../models/types";
 
 interface TimelineEvent {
@@ -26,6 +28,8 @@ interface TransactionTimelineProps {
   alerts: Alert[];
   edges: InvestigationEdge[];
   evidence: Evidence[];
+  nodes: InvestigationNode[];
+  entities: SharedEntity[];
   focusedId?: string;
   onFocus: (event?: TimelineEvent) => void;
 }
@@ -34,9 +38,20 @@ export function TransactionTimeline({
   alerts,
   edges,
   evidence,
+  nodes,
+  entities,
   focusedId,
   onFocus,
 }: TransactionTimelineProps) {
+  const entityByNodeId = new Map(
+    nodes
+      .filter((node) => node.entityId)
+      .map((node) => [
+        node.id,
+        entities.find((entity) => entity.id === node.entityId),
+      ]),
+  );
+
   const events: TimelineEvent[] = [
     ...alerts.map((item) => ({
       id: item.id,
@@ -46,14 +61,20 @@ export function TransactionTimeline({
       source: "alert" as const,
       resourceId: item.id,
     })),
-    ...edges.map((item) => ({
-      id: item.id,
-      at: item.occurredAt,
-      title: item.label,
-      detail: item.explanation,
-      source: "transaction" as const,
-      resourceId: item.id,
-    })),
+    ...edges.map((item) => {
+      const entity =
+        entityByNodeId.get(item.source) ?? entityByNodeId.get(item.target);
+      return {
+        id: item.id,
+        at: item.occurredAt,
+        title: item.label,
+        detail: entity
+          ? `${item.explanation}（共享实体 ${entity.identifier} · V${entity.version}）`
+          : item.explanation,
+        source: "transaction" as const,
+        resourceId: item.id,
+      };
+    }),
     ...evidence.map((item) => ({
       id: item.id,
       at: item.occurredAt,

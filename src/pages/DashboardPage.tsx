@@ -1,4 +1,5 @@
 import {
+  Alert,
   Badge,
   Button,
   Grid,
@@ -15,6 +16,7 @@ import {
   ArrowRight,
   CircleAlert,
   Files,
+  GitMerge,
   ShieldAlert,
   WalletCards,
 } from "lucide-react";
@@ -60,7 +62,7 @@ export function DashboardPage() {
     {
       label: "活跃案件",
       value: data.activeCases,
-      meta: `${data.pendingReview} 件待复核或补证`,
+      meta: `${data.pendingReview} 件待复核或补证 · ${data.staleConclusions} 份结论待核对`,
       icon: Files,
       color: "teal",
     },
@@ -95,6 +97,33 @@ export function DashboardPage() {
           进入告警中心
         </Button>
       </Group>
+
+      {data.staleConclusions > 0 || data.pendingEntityMerges > 0 ? (
+        <Alert
+          color="orange"
+          icon={<GitMerge size={16} />}
+          title="共享实体有待处理事项"
+        >
+          <Group justify="space-between" align="center">
+            <Text size="sm">
+              {data.staleConclusions > 0
+                ? `${data.staleConclusions} 份结论因实体更新失效，需重新核对；`
+                : ""}
+              {data.pendingEntityMerges > 0
+                ? `${data.pendingEntityMerges} 组重复设备 / IP 待归并确认。`
+                : ""}
+            </Text>
+            <Button
+              size="xs"
+              variant="light"
+              color="orange"
+              onClick={() => navigate("/cases")}
+            >
+              前往处理
+            </Button>
+          </Group>
+        </Alert>
+      ) : null}
 
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
         {metrics.map((metric) => {

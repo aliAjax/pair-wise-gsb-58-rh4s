@@ -1,4 +1,6 @@
 import {
+  Alert,
+  Badge,
   Button,
   Group,
   Paper,
@@ -9,7 +11,8 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { ArrowRight, FolderOpen } from "lucide-react";
+import { notifications } from "@mantine/notifications";
+import { ArrowRight, FolderOpen, GitMerge, ShieldAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -17,7 +20,11 @@ import {
   RiskBadge,
   caseStatusLabel,
 } from "../components/Badges";
-import { useGetCasesQuery } from "../services/api";
+import {
+  useGetCasesQuery,
+  useGetEntityRegistryQuery,
+  useResolvePendingMergeMutation,
+} from "../services/api";
 import type { CaseStatus } from "../models/types";
 
 type CaseFilter = "open" | "all" | CaseStatus;
@@ -25,6 +32,11 @@ type CaseFilter = "open" | "all" | CaseStatus;
 export function CasesPage() {
   const navigate = useNavigate();
   const { data: cases = [] } = useGetCasesQuery();
+  const { data: registry } = useGetEntityRegistryQuery(undefined, {
+    refetchOnFocus: true,
+  });
+  const [resolveMerge, { isLoading: isResolving }] =
+    useResolvePendingMergeMutation();
   const [filter, setFilter] = useState<CaseFilter>("open");
 
   const visibleCases = useMemo(() => {
@@ -40,6 +52,31 @@ export function CasesPage() {
   const closedCount = cases.filter((item) => item.status === "closed").length;
   const completion =
     cases.length === 0 ? 0 : Math.round((closedCount / cases.length) * 100);
+  const pendingMerges = registry?.pendingMerges ?? [];
+  const staleCaseIds = registry?.staleCaseIds ?? [];
+
+  const handleResolve = async (
+    mergeId: string,
+    decision: "merge" | "separate",
+  ) => {
+    try {
+      await resolveMerge({ mergeId, decision }).unwrap();
+      notifications.show({
+        color: "teal",
+        title: decision === "merge" ? "已归并为共享实体" : "已保留独立节点",
+        message:
+          decision === "merge"
+            ? "重复节点已合并，各案件将显示同一实体版本。"
+            : "已确认不是同一实体，各案件保留各自节点。",
+      });
+    } catch (error) {
+      const message =
+        typeof error === "object" && error && "error" in error
+          ? String(error.error)
+          : "处理失败，请重试。";
+      notifications.show({ color: "red", title: "待核处理失败", message });
+    }
+  };
 
   return (
     <Stack gap="lg">
@@ -58,6 +95,52 @@ export function CasesPage() {
           从告警创建关联
         </Button>
       </Group>
+
+      {pendingMerges.length > 0 ? (
+        <Alert
+          color="violet"
+          icon={<GitMerge size={16} />}
+          title={`${pendingMerges.length} 组重复实体待核`}
+        >
+          <Stack gap="xs" mt="xs">
+            {pendingMerges.map((item) => (
+              <Group key={item.id} justify="space-between" wrap="nowrap">
+                <Text size="sm">
+                  {item.kind === "device" ? "设备" : "IP"}{" "}
+                  <Text span ff="monospace" fw={600}>
+                    {item.identifier}
+                  </Text>{" "}
+                  出现在 {item.caseIds.join("、")}，{item.reason}
+                </Text>
+                <Group gap="xs" wrap="nowrap">
+                  <Button
+                    size="compact-xs"
+                    color="violet"
+                    loading={isResolving}
+                    onClick={() => handleResolve(item.id, "merge")}
+                  >
+                    确认归并
+                  </Button>
+                  <Button
+                    size="compact-xs"
+                    variant="default"
+                    loading={isResolving}
+                    onClick={() => handleResolve(item.id, "separate")}
+                  >
+                    保留独立节点
+                  </Button>
+                </Group>
+              </Group>
+            ))}
+          </Stack>
+        </Alert>
+      ) : null}
+
+      {staleCaseIds.length > 0 ? (
+        <Alert color="red" icon={<ShieldAlert size={16} />}>
+          {staleCaseIds.join("、")} 的结论因共享实体更新而失效，进入案件重新核对后才能恢复。
+        </Alert>
+      ) : null}
 
       <Paper withBorder p="md">
         <Group justify="space-between" align="center">
@@ -123,7 +206,14 @@ export function CasesPage() {
                     <RiskBadge value={item.riskLevel} />
                   </Table.Td>
                   <Table.Td>
-                    <CaseStatusBadge value={item.status} />
+                    <Stack gap={4} align="flex-start">
+                      <CaseStatusBadge value={item.status} />
+                      {staleCaseIds.includes(item.id) ? (
+                        <Badge color="red" variant="light" size="sm">
+                          结论待核对
+                        </Badge>
+                      ) : null}
+                    </Stack>
                   </Table.Td>
                   <Table.Td>{item.alertIds.length}</Table.Td>
                   <Table.Td>{item.owner}</Table.Td>

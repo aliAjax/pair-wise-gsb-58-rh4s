@@ -274,6 +274,34 @@ export const seedNodes: InvestigationNode[] = [
       occurredAt: "2026-09-25T14:10:00+08:00",
     },
   },
+  {
+    id: "N-DV-A91F-015",
+    caseId: "CASE-2026-015",
+    position: { x: 520, y: 60 },
+    data: {
+      label: "设备 DV-A91F",
+      kind: "device",
+      riskLevel: "medium",
+      note: "旧案登记为共用设备，设备归属尚未复核。",
+      evidenceStrength: "medium",
+      source: "历史案件设备清单",
+      occurredAt: "2026-09-25T14:10:00+08:00",
+    },
+  },
+  {
+    id: "N-IP-117-015",
+    caseId: "CASE-2026-015",
+    position: { x: 520, y: 300 },
+    data: {
+      label: "117.136.40.17",
+      kind: "ip",
+      riskLevel: "medium",
+      note: "受益账户登录 IP，与 017 案登记一致。",
+      evidenceStrength: "weak",
+      source: "登录 IP 清单",
+      occurredAt: "2026-09-25T13:40:00+08:00",
+    },
+  },
 ];
 
 export const seedEdges: InvestigationEdge[] = [
@@ -328,6 +356,26 @@ export const seedEdges: InvestigationEdge[] = [
     label: "登录 IP",
     occurredAt: "2026-09-28T12:06:00+08:00",
     explanation: "共享 IP 是关联线索，不能单独作为账户控制的结论。",
+  },
+  {
+    id: "E-101",
+    caseId: "CASE-2026-015",
+    source: "N-DV-A91F-015",
+    target: "N-3386",
+    kind: "shared_device",
+    label: "共同设备",
+    occurredAt: "2026-09-25T14:10:00+08:00",
+    explanation: "旧案登记的共同设备，设备归属与风险结论尚未与 017 案对齐。",
+  },
+  {
+    id: "E-102",
+    caseId: "CASE-2026-015",
+    source: "N-IP-117-015",
+    target: "N-3386",
+    kind: "shared_ip",
+    label: "登录 IP",
+    occurredAt: "2026-09-25T13:40:00+08:00",
+    explanation: "受益账户登录 IP 与 017 案一致，归并后以共享实体为准。",
   },
 ];
 

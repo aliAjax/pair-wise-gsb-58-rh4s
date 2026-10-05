@@ -33,6 +33,7 @@ interface GraphNodeData {
   riskLevel: InvestigationNode["data"]["riskLevel"];
   note: string;
   evidenceStrength: InvestigationNode["data"]["evidenceStrength"];
+  entityVersion?: number;
 }
 
 const nodeMeta: Record<
@@ -74,6 +75,11 @@ function InvestigationNodeCard({
       </Group>
       <Group gap={6} mt="xs">
         <RiskBadge value={data.riskLevel} />
+        {data.entityVersion !== undefined ? (
+          <Badge size="xs" variant="light" color="violet">
+            共享 V{data.entityVersion}
+          </Badge>
+        ) : null}
       </Group>
       <Handle type="source" position={Position.Bottom} />
     </Paper>
@@ -115,6 +121,7 @@ export function InvestigationGraph({
           riskLevel: item.data.riskLevel,
           note: item.data.note,
           evidenceStrength: item.data.evidenceStrength,
+          entityVersion: item.data.entityVersion,
         },
       })),
     [nodes, selectedNodeId],
@@ -187,6 +194,9 @@ export function InvestigationGraph({
           </Badge>
           <Badge variant="dot" color="gray">
             灰线：弱关联
+          </Badge>
+          <Badge variant="dot" color="violet">
+            共享 V：跨案共享实体版本
           </Badge>
           <Badge variant="dot" color="orange">
             高亮：时间轴选中

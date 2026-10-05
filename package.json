@@ -7,7 +7,8 @@
     "dev": "vite --host 0.0.0.0 --port 18458",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 18458",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:smoke": "esbuild scripts/smoke.ts scripts/smoke-api.ts scripts/smoke-render.tsx --bundle --platform=node --format=cjs --loader:.css=empty --external:jsdom --outdir=node_modules/.cache/smoke --out-extension:.js=.cjs && node node_modules/.cache/smoke/smoke.cjs && node node_modules/.cache/smoke/smoke-api.cjs && node node_modules/.cache/smoke/smoke-render.cjs"
   },
   "dependencies": {
     "@mantine/core": "^9.6.3",
@@ -27,6 +28,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.4",
+    "jsdom": "^29.1.1",
     "typescript": "~6.0.3",
     "vite": "^7.1.7"
   }

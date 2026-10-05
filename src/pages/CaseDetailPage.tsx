@@ -8,6 +8,7 @@ import {
   Modal,
   NumberInput,
   Paper,
+  Radio,
   Select,
   SimpleGrid,
   Stack,
@@ -20,13 +21,17 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
+import dayjs from "dayjs";
 import {
+  AlertTriangle,
   ArrowLeft,
   Check,
   FilePlus2,
   GitBranchPlus,
+  Pencil,
   RotateCcw,
   Send,
+  ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -36,6 +41,7 @@ import {
   ConclusionStatusBadge,
   EvidenceStrengthBadge,
   RiskBadge,
+  riskLabel,
 } from "../components/Badges";
 import {
   focusEvidence,
@@ -47,21 +53,28 @@ import {
   TransactionTimeline,
   type TimelineEvent,
 } from "../features/timeline/TransactionTimeline";
-import type {
-  CaseDisposition,
-  EvidenceStrength,
-  NodeKind,
-  RiskLevel,
+import {
+  isConclusionStale,
+  type CaseDisposition,
+  type EntityConflictInfo,
+  type EvidenceStrength,
+  type NodeKind,
+  type RiskLevel,
+  type SharedEntity,
+  type SharedEntityAttributes,
 } from "../models/types";
 import {
   useAddEvidenceMutation,
   useAddGraphNodeMutation,
   useGetAlertsQuery,
   useGetCaseWorkspaceQuery,
+  useRevalidateConclusionsMutation,
   useReviewConclusionMutation,
   useSaveConclusionMutation,
   useTransitionCaseMutation,
   useUpdateGraphNodeMutation,
+  useUpdateSharedEntityMutation,
+  useVerifySharedEntityMutation,
 } from "../services/api";
 import { createId, nowIso } from "../services/mockStorage";
 
@@ -71,12 +84,46 @@ const dispositionLabels: Record<CaseDisposition, string> = {
   observe: "继续观察",
 };
 
+const entityFieldLabels: Record<string, string> = {
+  riskLevel: "风险等级",
+  note: "实体说明",
+  evidenceStrength: "证据强度",
+  source: "证据来源",
+  occurredAt: "关联时间",
+};
+
+const strengthLabels: Record<string, string> = {
+  strong: "强证据",
+  medium: "中等证据",
+  weak: "弱证据",
+};
+
+const formatEntityValue = (field: string, value: string): string => {
+  if (field === "riskLevel") {
+    return riskLabel(value as RiskLevel);
+  }
+  if (field === "evidenceStrength") {
+    return strengthLabels[value] ?? value;
+  }
+  if (field === "occurredAt") {
+    return new Date(value).toLocaleString("zh-CN", { hour12: false });
+  }
+  return value;
+};
+
 const errorMessage = (error: unknown): string => {
   if (typeof error === "object" && error && "error" in error) {
     return String(error.error);
   }
   return "操作失败，请检查输入后重试。";
 };
+
+const isEntityConflict = (
+  error: unknown,
+): error is { status: string; error: string; data: EntityConflictInfo } =>
+  typeof error === "object" &&
+  error !== null &&
+  (error as { status?: unknown }).status === "CONFLICT";
 
 export function CaseDetailPage() {
   const { caseId = "" } = useParams();
@@ -91,7 +138,9 @@ export function CaseDetailPage() {
   const focusedEvidenceId = useAppSelector(
     (state) => state.alertsUi.focusedEvidenceId,
   );
-  const { data, isLoading, error } = useGetCaseWorkspaceQuery(caseId);
+  const { data, isLoading, error } = useGetCaseWorkspaceQuery(caseId, {
+    refetchOnFocus: true,
+  });
   const { data: allAlerts = [] } = useGetAlertsQuery({
     keyword: "",
     riskLevel: "all",
@@ -108,11 +157,35 @@ export function CaseDetailPage() {
     useTransitionCaseMutation();
   const [reviewConclusion, { isLoading: isReviewing }] =
     useReviewConclusionMutation();
+  const [updateEntity, { isLoading: isUpdatingEntity }] =
+    useUpdateSharedEntityMutation();
+  const [verifyEntity, { isLoading: isVerifyingEntity }] =
+    useVerifySharedEntityMutation();
+  const [revalidateConclusions, { isLoading: isRevalidating }] =
+    useRevalidateConclusionsMutation();
 
   const [nodeOpened, nodeModal] = useDisclosure(false);
   const [evidenceOpened, evidenceModal] = useDisclosure(false);
   const [conclusionOpened, conclusionModal] = useDisclosure(false);
+  const [entityEditOpened, entityEditModal] = useDisclosure(false);
+  const [conflictOpened, conflictModal] = useDisclosure(false);
+  const [revalidateOpened, revalidateModal] = useDisclosure(false);
   const [reviewNote, setReviewNote] = useState("");
+  const [editingEntity, setEditingEntity] = useState<SharedEntity | null>(null);
+  const [entityForm, setEntityForm] = useState({
+    riskLevel: "medium" as RiskLevel,
+    evidenceStrength: "medium" as EvidenceStrength,
+    source: "",
+    occurredAt: "",
+    note: "",
+  });
+  const [pendingChanges, setPendingChanges] =
+    useState<Partial<SharedEntityAttributes> | null>(null);
+  const [conflict, setConflict] = useState<EntityConflictInfo | null>(null);
+  const [conflictChoice, setConflictChoice] = useState<
+    Record<string, "current" | "incoming">
+  >({});
+  const [revalidateNote, setRevalidateNote] = useState("");
   const [nodeForm, setNodeForm] = useState({
     sourceId: "",
     kind: "account" as NodeKind,
@@ -156,7 +229,14 @@ export function CaseDetailPage() {
     data.case.alertIds.includes(item.id),
   );
   const selectedNode = data.nodes.find((item) => item.id === selectedNodeId);
+  const selectedEntity = selectedNode?.entityId
+    ? data.entities.find((item) => item.id === selectedNode.entityId)
+    : undefined;
   const latestConclusion = data.conclusions[0];
+  const latestConclusionStale = latestConclusion
+    ? isConclusionStale(latestConclusion)
+    : false;
+  const staleConclusions = data.conclusions.filter(isConclusionStale);
 
   const handleTimelineFocus = (event?: TimelineEvent) => {
     dispatch(focusTimeline(event?.id));
@@ -166,6 +246,176 @@ export function CaseDetailPage() {
       if (edge) {
         dispatch(selectNode(edge.target));
       }
+    }
+  };
+
+  const openEntityEditor = (entity: SharedEntity) => {
+    setEditingEntity(entity);
+    setEntityForm({
+      riskLevel: entity.riskLevel,
+      evidenceStrength: entity.evidenceStrength,
+      source: entity.source,
+      occurredAt: dayjs(entity.occurredAt).format("YYYY-MM-DDTHH:mm"),
+      note: entity.note,
+    });
+    entityEditModal.open();
+  };
+
+  const buildEntityChanges = (): Partial<SharedEntityAttributes> => ({
+    riskLevel: entityForm.riskLevel,
+    evidenceStrength: entityForm.evidenceStrength,
+    source: entityForm.source.trim(),
+    note: entityForm.note.trim(),
+    occurredAt: new Date(entityForm.occurredAt).toISOString(),
+  });
+
+  const applyConflict = (info: EntityConflictInfo) => {
+    setConflict(info);
+    setConflictChoice(
+      Object.fromEntries(
+        info.fields.map((field) => [
+          field.field,
+          field.locked ? "current" : "incoming",
+        ]),
+      ),
+    );
+  };
+
+  const handleEntitySave = async () => {
+    if (!editingEntity) {
+      return;
+    }
+    const changes = buildEntityChanges();
+    try {
+      const saved = await updateEntity({
+        entityId: editingEntity.id,
+        baseVersion: editingEntity.version,
+        changes,
+      }).unwrap();
+      notifications.show({
+        color: "teal",
+        title: "共享实体已更新",
+        message: `${saved.label} 已保存为 V${saved.version}，受影响案件的旧结论已失效，需重新核对。`,
+      });
+      entityEditModal.close();
+      setEditingEntity(null);
+    } catch (mutationError) {
+      if (isEntityConflict(mutationError)) {
+        setPendingChanges(changes);
+        applyConflict(mutationError.data);
+        entityEditModal.close();
+        conflictModal.open();
+        return;
+      }
+      notifications.show({
+        color: "red",
+        title: "实体保存失败",
+        message: errorMessage(mutationError),
+      });
+    }
+  };
+
+  const handleConflictResolve = async () => {
+    if (!conflict || !pendingChanges) {
+      return;
+    }
+    const resolved: Partial<SharedEntityAttributes> = { ...pendingChanges };
+    conflict.fields.forEach((field) => {
+      const keepCurrent =
+        field.locked || conflictChoice[field.field] !== "incoming";
+      (resolved as Record<string, string>)[field.field] = keepCurrent
+        ? field.current
+        : field.incoming;
+    });
+    try {
+      const saved = await updateEntity({
+        entityId: conflict.entity.id,
+        baseVersion: conflict.entity.version,
+        changes: resolved,
+        note: "并发冲突逐项处理后保存。",
+      }).unwrap();
+      notifications.show({
+        color: "teal",
+        title: "冲突已处理",
+        message: `${saved.label} 已保存为 V${saved.version}，受影响案件的结论需重新核对。`,
+      });
+      conflictModal.close();
+      setConflict(null);
+      setPendingChanges(null);
+      setEditingEntity(null);
+    } catch (mutationError) {
+      if (isEntityConflict(mutationError)) {
+        applyConflict(mutationError.data);
+        notifications.show({
+          color: "orange",
+          title: "实体再次被更新",
+          message: "请确认最新的字段冲突后再保存。",
+        });
+        return;
+      }
+      notifications.show({
+        color: "red",
+        title: "实体保存失败",
+        message: errorMessage(mutationError),
+      });
+    }
+  };
+
+  const handleVerifyEntity = async (entity: SharedEntity) => {
+    try {
+      const saved = await verifyEntity({
+        entityId: entity.id,
+        baseVersion: entity.version,
+      }).unwrap();
+      notifications.show({
+        color: "teal",
+        title: "实体已核验",
+        message: `${saved.label} 已核验为 V${saved.version}，他人不能覆盖已核验字段。`,
+      });
+    } catch (mutationError) {
+      if (isEntityConflict(mutationError)) {
+        notifications.show({
+          color: "orange",
+          title: "核验失败",
+          message: "该实体刚被他人更新，请基于最新版本重新核验。",
+        });
+        return;
+      }
+      notifications.show({
+        color: "red",
+        title: "核验失败",
+        message: errorMessage(mutationError),
+      });
+    }
+  };
+
+  const handleRevalidate = async () => {
+    if (revalidateNote.trim().length < 6) {
+      notifications.show({
+        color: "red",
+        title: "核对说明不足",
+        message: "重新核对的说明至少需要 6 个字符。",
+      });
+      return;
+    }
+    try {
+      const restored = await revalidateConclusions({
+        caseId,
+        note: revalidateNote.trim(),
+      }).unwrap();
+      notifications.show({
+        color: "teal",
+        title: "结论已恢复",
+        message: `${restored.length} 份结论已重新核对并恢复，可继续复核流程。`,
+      });
+      revalidateModal.close();
+      setRevalidateNote("");
+    } catch (mutationError) {
+      notifications.show({
+        color: "red",
+        title: "重新核对失败",
+        message: errorMessage(mutationError),
+      });
     }
   };
 
@@ -197,7 +447,12 @@ export function CaseDetailPage() {
         },
         relation: {
           sourceId: nodeForm.sourceId,
-          kind: "transfer",
+          kind:
+            nodeForm.kind === "device"
+              ? "shared_device"
+              : nodeForm.kind === "ip"
+                ? "shared_ip"
+                : "transfer",
           label: nodeForm.relationLabel.trim() || "已登记关系",
           explanation:
             nodeForm.relationExplanation.trim() ||
@@ -463,6 +718,29 @@ export function CaseDetailPage() {
         </Group>
       </Paper>
 
+      {staleConclusions.length > 0 ? (
+        <Alert
+          color="red"
+          icon={<AlertTriangle size={16} />}
+          title={`${staleConclusions.length} 份结论因共享实体更新而失效`}
+        >
+          <Group justify="space-between" align="center">
+            <Text size="sm">
+              {staleConclusions[0].invalidated?.reason}
+              重新核对并恢复后才能继续复核或关闭案件。
+            </Text>
+            <Button
+              size="xs"
+              color="red"
+              variant="light"
+              onClick={revalidateModal.open}
+            >
+              重新核对并恢复
+            </Button>
+          </Group>
+        </Alert>
+      ) : null}
+
       <Tabs defaultValue="graph" keepMounted={false}>
         <Tabs.List>
           <Tabs.Tab value="graph">关系图谱与时间轴</Tabs.Tab>
@@ -525,6 +803,56 @@ export function CaseDetailPage() {
                   <Text size="sm" mt="sm">
                     {selectedNode.data.note}
                   </Text>
+                  {selectedEntity ? (
+                    <>
+                      <Divider my="sm" />
+                      <Group justify="space-between" align="center">
+                        <Group gap="xs">
+                          <Badge color="violet" variant="light">
+                            共享实体 V{selectedEntity.version}
+                          </Badge>
+                          {selectedEntity.verifiedAt ? (
+                            <Badge color="teal" variant="light">
+                              已核验 · {selectedEntity.verifiedBy}
+                            </Badge>
+                          ) : (
+                            <Badge color="gray" variant="light">
+                              未核验
+                            </Badge>
+                          )}
+                        </Group>
+                        <Group gap="xs">
+                          <Button
+                            size="xs"
+                            variant="default"
+                            leftSection={<Pencil size={13} />}
+                            onClick={() => openEntityEditor(selectedEntity)}
+                          >
+                            编辑共享实体
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="light"
+                            color="teal"
+                            leftSection={<ShieldCheck size={13} />}
+                            loading={isVerifyingEntity}
+                            onClick={() => handleVerifyEntity(selectedEntity)}
+                          >
+                            标记核验
+                          </Button>
+                        </Group>
+                      </Group>
+                      <Text size="xs" c="dimmed" mt={6}>
+                        {selectedEntity.identifier} · 更新人{" "}
+                        {selectedEntity.updatedBy} ·{" "}
+                        {new Date(selectedEntity.updatedAt).toLocaleString(
+                          "zh-CN",
+                          { hour12: false },
+                        )}{" "}
+                        · 属性修改会同步到所有引用案件，并使其旧结论失效
+                      </Text>
+                    </>
+                  ) : null}
                 </Paper>
               ) : null}
             </Grid.Col>
@@ -556,6 +884,8 @@ export function CaseDetailPage() {
                     alerts={caseAlerts}
                     edges={data.edges}
                     evidence={data.evidence}
+                    nodes={data.nodes}
+                    entities={data.entities}
                     focusedId={focusedTimelineId}
                     onFocus={handleTimelineFocus}
                   />
@@ -674,6 +1004,16 @@ export function CaseDetailPage() {
                             <Badge variant="light" color="gray">
                               {dispositionLabels[item.disposition]}
                             </Badge>
+                            {isConclusionStale(item) ? (
+                              <Badge color="red" variant="filled">
+                                已失效
+                              </Badge>
+                            ) : null}
+                            {item.invalidated && item.revalidated ? (
+                              <Badge color="teal" variant="light">
+                                已重新核对
+                              </Badge>
+                            ) : null}
                           </Group>
                           <Text size="xs" c="dimmed">
                             {item.createdBy} ·{" "}
@@ -683,6 +1023,24 @@ export function CaseDetailPage() {
                           </Text>
                         </Group>
                         <Text size="sm">{item.rationale}</Text>
+                        {isConclusionStale(item) && item.invalidated ? (
+                          <Alert
+                            color="red"
+                            icon={<AlertTriangle size={16} />}
+                            title={`结论失效 · ${new Date(item.invalidated.at).toLocaleString("zh-CN", { hour12: false })}`}
+                          >
+                            {item.invalidated.reason}
+                          </Alert>
+                        ) : null}
+                        {item.revalidated ? (
+                          <Alert
+                            color="teal"
+                            icon={<ShieldCheck size={16} />}
+                            title={`重新核对 · ${item.revalidated.by} · ${new Date(item.revalidated.at).toLocaleString("zh-CN", { hour12: false })}`}
+                          >
+                            {item.revalidated.note}
+                          </Alert>
+                        ) : null}
                         <Group gap="xs">
                           {item.riskControls.map((control) => (
                             <Badge key={control} variant="outline" color="gray">
@@ -715,13 +1073,23 @@ export function CaseDetailPage() {
                       当前版本 V{latestConclusion.version} ·{" "}
                       {dispositionLabels[latestConclusion.disposition]}
                     </Text>
-                    <Alert
-                      color="orange"
-                      icon={<RotateCcw size={16} />}
-                      mt="md"
-                    >
-                      关系关联不能直接作为结论。通过前应检查证据来源、发生时间与证据强度。
-                    </Alert>
+                    {latestConclusionStale ? (
+                      <Alert
+                        color="red"
+                        icon={<AlertTriangle size={16} />}
+                        mt="md"
+                      >
+                        当前结论已因共享实体更新而失效，请先“重新核对并恢复”，再执行复核。
+                      </Alert>
+                    ) : (
+                      <Alert
+                        color="orange"
+                        icon={<RotateCcw size={16} />}
+                        mt="md"
+                      >
+                        关系关联不能直接作为结论。通过前应检查证据来源、发生时间与证据强度。
+                      </Alert>
+                    )}
                     <Textarea
                       label="复核意见"
                       description="通过或退回意见均进入不可删除的审计记录"
@@ -737,6 +1105,7 @@ export function CaseDetailPage() {
                         leftSection={<Check size={16} />}
                         color="teal"
                         loading={isReviewing}
+                        disabled={latestConclusionStale}
                         onClick={() => handleReview("approve")}
                       >
                         复核通过
@@ -746,6 +1115,7 @@ export function CaseDetailPage() {
                         color="orange"
                         leftSection={<RotateCcw size={16} />}
                         loading={isReviewing}
+                        disabled={latestConclusionStale}
                         onClick={() => handleReview("return")}
                       >
                         退回补证
@@ -806,6 +1176,11 @@ export function CaseDetailPage() {
         title="加入案件图谱节点"
         size="lg"
       >
+        {nodeForm.kind === "device" || nodeForm.kind === "ip" ? (
+          <Alert color="violet" mb="md" icon={<ShieldCheck size={16} />}>
+            设备 / IP 节点将关联或创建共享实体：各案件共用同一份属性与版本，此处填写的属性仅在新建实体时生效。
+          </Alert>
+        ) : null}
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
           <Select
             label="关系源节点"
@@ -1114,6 +1489,246 @@ export function CaseDetailPage() {
             onClick={() => handleSaveConclusion(true)}
           >
             提交复核
+          </Button>
+        </Group>
+      </Modal>
+
+      <Modal
+        opened={entityEditOpened}
+        onClose={() => {
+          entityEditModal.close();
+          setEditingEntity(null);
+        }}
+        title={
+          editingEntity
+            ? `编辑共享实体 · ${editingEntity.identifier}（当前 V${editingEntity.version}）`
+            : "编辑共享实体"
+        }
+        size="lg"
+      >
+        <Alert color="violet" mb="md" icon={<AlertTriangle size={16} />}>
+          修改会同步到所有引用该实体的案件，受影响案件的旧结论将失效，需重新核对后才能恢复。
+        </Alert>
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          <Select
+            label="风险等级"
+            value={entityForm.riskLevel}
+            onChange={(value) =>
+              setEntityForm((current) => ({
+                ...current,
+                riskLevel: (value as RiskLevel) ?? "medium",
+              }))
+            }
+            data={[
+              { value: "high", label: "高风险" },
+              { value: "medium", label: "中风险" },
+              { value: "low", label: "低风险" },
+            ]}
+          />
+          <Select
+            label="证据强度"
+            value={entityForm.evidenceStrength}
+            onChange={(value) =>
+              setEntityForm((current) => ({
+                ...current,
+                evidenceStrength:
+                  (value as EvidenceStrength) ?? "medium",
+              }))
+            }
+            data={[
+              { value: "strong", label: "强证据" },
+              { value: "medium", label: "中等证据" },
+              { value: "weak", label: "弱证据" },
+            ]}
+          />
+          <TextInput
+            label="证据来源"
+            value={entityForm.source}
+            onChange={(event) =>
+              setEntityForm((current) => ({
+                ...current,
+                source: event.currentTarget.value,
+              }))
+            }
+          />
+          <TextInput
+            type="datetime-local"
+            label="关联时间"
+            value={entityForm.occurredAt}
+            onChange={(event) =>
+              setEntityForm((current) => ({
+                ...current,
+                occurredAt: event.currentTarget.value,
+              }))
+            }
+          />
+        </SimpleGrid>
+        <Textarea
+          label="实体说明"
+          minRows={3}
+          mt="md"
+          value={entityForm.note}
+          onChange={(event) =>
+            setEntityForm((current) => ({
+              ...current,
+              note: event.currentTarget.value,
+            }))
+          }
+        />
+        <Group justify="flex-end" mt="lg">
+          <Button
+            variant="default"
+            onClick={() => {
+              entityEditModal.close();
+              setEditingEntity(null);
+            }}
+          >
+            取消
+          </Button>
+          <Button loading={isUpdatingEntity} onClick={handleEntitySave}>
+            保存共享实体
+          </Button>
+        </Group>
+      </Modal>
+
+      <Modal
+        opened={conflictOpened}
+        onClose={() => {
+          conflictModal.close();
+          setConflict(null);
+          setPendingChanges(null);
+        }}
+        title={
+          conflict
+            ? `字段冲突 · ${conflict.entity.identifier}（最新 V${conflict.entity.version}）`
+            : "字段冲突"
+        }
+        size="xl"
+      >
+        {conflict ? (
+          <Stack gap="md">
+            <Alert color="orange" icon={<AlertTriangle size={16} />}>
+              该实体在您编辑期间已被他人保存。请逐项选择保留哪个版本；对方已核验的字段不可覆盖。
+            </Alert>
+            <Table withTableBorder withColumnBorders>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>字段</Table.Th>
+                  <Table.Th>对方当前值</Table.Th>
+                  <Table.Th>我的提交</Table.Th>
+                  <Table.Th>保留</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {conflict.fields.map((field) => (
+                  <Table.Tr key={field.field}>
+                    <Table.Td>
+                      <Text size="sm" fw={600}>
+                        {entityFieldLabels[field.field] ?? field.field}
+                      </Text>
+                      {field.locked ? (
+                        <Badge color="teal" variant="light" size="xs">
+                          对方已核验
+                        </Badge>
+                      ) : null}
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm">
+                        {formatEntityValue(field.field, field.current)}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm">
+                        {formatEntityValue(field.field, field.incoming)}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Radio.Group
+                        value={
+                          field.locked
+                            ? "current"
+                            : (conflictChoice[field.field] ?? "incoming")
+                        }
+                        onChange={(value) =>
+                          setConflictChoice((current) => ({
+                            ...current,
+                            [field.field]: value as "current" | "incoming",
+                          }))
+                        }
+                      >
+                        <Group gap="xs">
+                          <Radio
+                            value="current"
+                            label="对方"
+                            disabled={field.locked}
+                          />
+                          <Radio
+                            value="incoming"
+                            label="我的"
+                            disabled={field.locked}
+                          />
+                        </Group>
+                      </Radio.Group>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+            <Group justify="flex-end">
+              <Button
+                variant="default"
+                onClick={() => {
+                  conflictModal.close();
+                  setConflict(null);
+                  setPendingChanges(null);
+                }}
+              >
+                放弃本次修改
+              </Button>
+              <Button loading={isUpdatingEntity} onClick={handleConflictResolve}>
+                按选择保存
+              </Button>
+            </Group>
+          </Stack>
+        ) : null}
+      </Modal>
+
+      <Modal
+        opened={revalidateOpened}
+        onClose={() => {
+          revalidateModal.close();
+          setRevalidateNote("");
+        }}
+        title="重新核对并恢复结论"
+        size="lg"
+      >
+        <Alert color="red" mb="md" icon={<AlertTriangle size={16} />}>
+          将按共享实体的最新版本重新核对本案件 {staleConclusions.length}{" "}
+          份失效结论，恢复后方可继续复核或关闭案件。
+        </Alert>
+        <Textarea
+          label="核对说明"
+          description="说明核对依据，至少 6 个字符；说明会写入审计记录"
+          minRows={4}
+          value={revalidateNote}
+          onChange={(event) => setRevalidateNote(event.currentTarget.value)}
+        />
+        <Group justify="flex-end" mt="lg">
+          <Button
+            variant="default"
+            onClick={() => {
+              revalidateModal.close();
+              setRevalidateNote("");
+            }}
+          >
+            取消
+          </Button>
+          <Button
+            color="teal"
+            loading={isRevalidating}
+            onClick={handleRevalidate}
+          >
+            确认重新核对
           </Button>
         </Group>
       </Modal>

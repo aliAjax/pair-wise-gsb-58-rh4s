@@ -13,7 +13,12 @@ import {
 import { notifications } from "@mantine/notifications";
 import { Download, RotateCcw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useGetAuditLogsQuery, useGetCasesQuery, useResetMockDataMutation } from "../services/api";
+import {
+  useGetAuditLogsQuery,
+  useGetCasesQuery,
+  useGetEntityRegistryQuery,
+  useResetMockDataMutation,
+} from "../services/api";
 
 const download = (
   filename: string,
@@ -35,10 +40,22 @@ const escapeCsv = (value: string): string =>
 export function AuditPage() {
   const { data: logs = [] } = useGetAuditLogsQuery();
   const { data: cases = [] } = useGetCasesQuery();
+  const { data: registry } = useGetEntityRegistryQuery();
   const [resetMockData, { isLoading: isResetting }] =
     useResetMockDataMutation();
   const [keyword, setKeyword] = useState("");
   const [caseId, setCaseId] = useState("all");
+
+  const entityLabel = useMemo(() => {
+    const map = new Map(
+      (registry?.entities ?? []).map((entity) => [entity.id, entity]),
+    );
+    return (entityId: string, entityVersion?: number) => {
+      const entity = map.get(entityId);
+      const name = entity ? entity.identifier : entityId;
+      return entityVersion ? `${name} · V${entityVersion}` : name;
+    };
+  }, [registry]);
 
   const filteredLogs = useMemo(() => {
     const normalized = keyword.trim().toLowerCase();
@@ -87,7 +104,29 @@ export function AuditPage() {
             onClick={() =>
               download(
                 "fraud-case-audit.json",
-                JSON.stringify(filteredLogs, null, 2),
+                JSON.stringify(
+                  {
+                    exportedAt: new Date().toISOString(),
+                    auditLogs: filteredLogs,
+                    sharedEntities: (registry?.entities ?? []).map(
+                      (entity) => ({
+                        id: entity.id,
+                        kind: entity.kind,
+                        identifier: entity.identifier,
+                        version: entity.version,
+                        riskLevel: entity.riskLevel,
+                        evidenceStrength: entity.evidenceStrength,
+                        occurredAt: entity.occurredAt,
+                        updatedBy: entity.updatedBy,
+                        updatedAt: entity.updatedAt,
+                        verifiedBy: entity.verifiedBy ?? null,
+                        verifiedAt: entity.verifiedAt ?? null,
+                      }),
+                    ),
+                  },
+                  null,
+                  2,
+                ),
                 "application/json;charset=utf-8",
               )
             }
@@ -100,12 +139,15 @@ export function AuditPage() {
               download(
                 "fraud-case-audit.csv",
                 [
-                  ["时间", "案件", "操作人", "动作", "详情"],
+                  ["时间", "案件", "操作人", "动作", "共享实体", "详情"],
                   ...filteredLogs.map((item) => [
                     item.at,
                     item.caseId ?? "",
                     item.actor,
                     item.action,
+                    item.entityId
+                      ? entityLabel(item.entityId, item.entityVersion)
+                      : "",
                     item.detail,
                   ]),
                 ]
@@ -180,6 +222,7 @@ export function AuditPage() {
                 <Table.Th>案件</Table.Th>
                 <Table.Th>操作人</Table.Th>
                 <Table.Th>动作</Table.Th>
+                <Table.Th>共享实体</Table.Th>
                 <Table.Th>详情</Table.Th>
               </Table.Tr>
             </Table.Thead>
@@ -203,6 +246,17 @@ export function AuditPage() {
                     <Text size="sm" fw={600}>
                       {item.action}
                     </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    {item.entityId ? (
+                      <Text size="sm" ff="monospace">
+                        {entityLabel(item.entityId, item.entityVersion)}
+                      </Text>
+                    ) : (
+                      <Text size="xs" c="dimmed">
+                        —
+                      </Text>
+                    )}
                   </Table.Td>
                   <Table.Td maw={520}>
                     <Text size="sm">{item.detail}</Text>
